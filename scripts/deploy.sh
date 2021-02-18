@@ -3,8 +3,6 @@
 # unlock wallet
 cleos wallet unlock --password $(cat ~/eosio-wallet/.pass)
 
-blanc++ zap.sx.cpp -I ..
-
 # create account
 cleos create account eosio zap.sx EOS6MRyAjQq8ud7hVNYcfnVPJqcVpscN5So8BhtHuGYqET5GDW5CV
 

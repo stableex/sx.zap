@@ -5,9 +5,10 @@
 
 #include "zap.sx.hpp"
 
+namespace sx {
 
 [[eosio::on_notify("*::transfer")]]
-void sx::zap::on_transfer( const name from, const name to, const asset quantity, const string memo )
+void zap::on_transfer( const name from, const name to, const asset quantity, const string memo )
 {
     // authenticate incoming `from` account
     require_auth( from );
@@ -15,50 +16,49 @@ void sx::zap::on_transfer( const name from, const name to, const asset quantity,
     // ignore transfers
     if ( to != get_self() || memo == get_self().to_string() || from == "eosio.ram"_n || from == CURVE_CONTRACT) return;
 
+    // user input
+    const extended_asset ext_in = { quantity, get_first_receiver() };
     const symbol_code symcode = utils::parse_symbol_code(memo);
-    check(symcode.raw(), "Zap.sx: wrong memo format");
+    check( symcode.raw(), "zap.sx::on_transfer: wrong memo format (ex: \"SXA\")");
 
-    const auto [ ext_in0, ext_in1, ext_lp_sym] = get_curve_split(extended_asset{ quantity, get_first_receiver()}, symcode);
+    // calculate curve split
+    const auto [ ext_in0, ext_in1, ext_lp_sym] = get_curve_split( ext_in, symcode );
+    const extended_symbol ext_sym0 = ext_in0.get_extended_symbol();
+    const extended_symbol ext_sym1 = ext_in1.get_extended_symbol();
 
     print("\n", quantity, " => ", ext_in0.quantity, " + ", ext_in1.quantity);
 
-    //make sure zap.sx account is clean of tokens
-    // const asset bal0 = eosio::token::get_balance( ext_in0.contract, get_self(), ext_in0.quantity.symbol.code() );
-    // const asset bal1 = eosio::token::get_balance( ext_in1.contract, get_self(), ext_in1.quantity.symbol.code() );
-    // const asset bal_lptokens = eosio::token::get_balance( ext_lp_sym.get_contract(), get_self(), symcode );
-    // check(bal0 == quantity /*&& bal1.amount == 0 && bal_lptokens.amount == 0*/, "Zap.sx: balance not clean");
+    // // make sure zap.sx account is clean of tokens
+    // const asset bal0 = zap::get_balance( ext_sym0, get_self() );
+    // const asset bal1 = zap::get_balance( ext_sym1, get_self() );
+    // const asset bal_lptokens = zap::get_balance( ext_lp_sym, get_self() );
+    // check( bal0 == quantity /*&& bal1.amount == 0 && bal_lptokens.amount == 0*/, "zap.sx::on_transfer: balance not clean");
 
+    // swap part of tokens for deposit
+    transfer( get_self(), CURVE_CONTRACT, ext_in0, "swap,0," + symcode.to_string() );
 
-    eosio::token::transfer_action transfer( ext_in0.contract, permission_level{ get_self(), "active"_n } );
-    flush_action flush_in0( ext_in0.contract, permission_level{ get_self(), "active"_n } );
-    flush_action flush_in1( ext_in1.contract, permission_level{ get_self(), "active"_n } );
-    flush_action flush_ltoken( ext_lp_sym.get_contract(), permission_level{ get_self(), "active"_n } );
-    sx::curve::deposit_action deposit( CURVE_CONTRACT, permission_level{ get_self(), "active"_n } );
+    // deposit pair to curve.sx
+    flush_action flush( get_self(), { get_self(), "active"_n } );
+    flush.send( ext_sym0, CURVE_CONTRACT, "deposit," + symcode.to_string() );
+    flush.send( ext_sym1, CURVE_CONTRACT, "deposit," + symcode.to_string() );
+    deposit( symcode );
 
-    //swap part of tokens for deposit
-    transfer.send( get_self(), CURVE_CONTRACT, ext_in0.quantity, "swap,0," + symcode.to_string() );
+    // send excess back to sender
+    flush.send( ext_sym0, from, "excess" );
+    flush.send( ext_sym1, from, "excess" );
 
-    //deposit pair
-    flush_in0.send( ext_in0.get_extended_symbol(), CURVE_CONTRACT, "deposit," + symcode.to_string(), 1 );
-    flush_in1.send( ext_in1.get_extended_symbol(), CURVE_CONTRACT, "deposit," + symcode.to_string(), 1 );
-    deposit.send( get_self(), symcode );
-
-    //send excess
-    flush_in0.send( ext_in0.get_extended_symbol(), from, "excess", 0 );
-    flush_in1.send( ext_in1.get_extended_symbol(), from, "excess", 0 );
-
-    //flush lp tokens
-    flush_ltoken.send( ext_lp_sym, from, "liquidity", 1 );
+    // send lptoken.sx to sender
+    flush.send( ext_lp_sym, from, "liquidity" );
 }
 
 
-tuple<extended_asset, extended_asset, extended_symbol> sx::zap::get_curve_split(const extended_asset ext_in, const symbol_code pair_id) {
+tuple<extended_asset, extended_asset, extended_symbol> zap::get_curve_split(const extended_asset ext_in, const symbol_code pair_id) {
 
     sx::curve::pairs_table _pairs( CURVE_CONTRACT, CURVE_CONTRACT.value );
-    auto pairs = _pairs.get( pair_id.raw(), "Zap.sx: `pair_id` does not exist on Curve.sx");
+    auto pairs = _pairs.get( pair_id.raw(), "zap.sx::get_curve_split: `pair_id` does not exist on curve.sx");
 
-    if(pairs.reserve0.get_extended_symbol() != ext_in.get_extended_symbol()) std::swap(pairs.reserve0, pairs.reserve1);
-    check(pairs.reserve0.get_extended_symbol() == ext_in.get_extended_symbol(), "Zap.sx: Invalid token for this `pair_id`");
+    if (pairs.reserve0.get_extended_symbol() != ext_in.get_extended_symbol()) std::swap(pairs.reserve0, pairs.reserve1);
+    check(pairs.reserve0.get_extended_symbol() == ext_in.get_extended_symbol(), "zap.sx::get_curve_split: invalid token for this `pair_id`");
 
     const auto amp = sx::curve::get_amplifier(pair_id);
     print("\nReserves: ", pairs.reserve0.quantity, " & ", pairs.reserve1.quantity);
@@ -78,13 +78,35 @@ tuple<extended_asset, extended_asset, extended_symbol> sx::zap::get_curve_split(
 }
 
 [[eosio::action]]
-void sx::zap::flush(const extended_symbol& ext_sym, const name& to, const string& memo, uint64_t min)
+void zap::flush( const extended_symbol ext_sym, const name to, const string memo )
 {
     require_auth( get_self() );
 
-    const asset balance = eosio::token::get_balance( ext_sym.get_contract(), get_self(), ext_sym.get_symbol().code() );
-    check(balance.amount >= 0, "Zap.sx: Nothing to transfer");
+    const extended_asset balance = zap::get_balance( ext_sym, get_self() );
+    if ( balance.quantity.amount > 0 ) transfer( get_self(), to, balance, memo );
+}
 
-    eosio::token::transfer_action transfer( ext_sym.get_contract(), permission_level{ get_self(), "active"_n } );
-    transfer.send( get_self(), to, balance, memo );
+// sx.curve helpers
+void zap::deposit( const symbol_code symcode )
+{
+    sx::curve::deposit_action deposit( CURVE_CONTRACT, { get_self(), "active"_n } );
+    deposit.send( get_self(), symcode );
+}
+
+// eosio.token helpers
+void zap::transfer( const name from, const name to, const extended_asset value, const string memo )
+{
+    eosio::token::transfer_action transfer( value.contract, { from, "active"_n });
+    transfer.send( from, to, value.quantity, memo );
+}
+
+extended_asset zap::get_balance( const extended_symbol ext_sym, const name owner )
+{
+    eosio::token::accounts _accounts( ext_sym.get_contract(), owner.value );
+    auto accounts = _accounts.find( ext_sym.get_symbol().code().raw() );
+    if ( accounts == _accounts.end() ) return { 0, ext_sym };
+    check( ext_sym.get_symbol() == accounts->balance.symbol, "zap::get_balanace: extended symbol mismatch balance");
+    return { accounts->balance.amount, ext_sym };
+}
+
 }
