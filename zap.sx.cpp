@@ -23,11 +23,8 @@ void sx::zap::on_transfer( const name from, const name to, const asset quantity,
     print("\n", quantity, " => ", ext_in0.quantity, " + ", ext_in1.quantity);
 
     //make sure zap.sx account is clean of tokens
-    print("\n Checking balance for ", ext_in0.quantity.symbol, " @ ", ext_in0.contract);
     const asset bal0 = eosio::token::get_balance( ext_in0.contract, get_self(), ext_in0.quantity.symbol.code() );
-    print("\n Checking balance for ", ext_in1.quantity.symbol, " @ ", ext_in1.contract);
    // const asset bal1 = eosio::token::get_balance( ext_in1.contract, get_self(), ext_in1.quantity.symbol.code() );
-    print("\n Checking balance for ", symcode, " @ ", ext_lp_sym.get_contract());
    // const asset bal_lptokens = eosio::token::get_balance( ext_lp_sym.get_contract(), get_self(), symcode );
     check(bal0 == quantity /*&& bal1.amount == 0 && bal_lptokens.amount == 0*/, "Zap.sx: balance not clean");
 
@@ -42,13 +39,13 @@ void sx::zap::on_transfer( const name from, const name to, const asset quantity,
     transfer.send( get_self(), CURVE_CONTRACT, ext_in0.quantity, "swap,0," + symcode.to_string() );
 
     //deposit liquidity
-    flush0.send( ext_in0.get_extended_symbol(), CURVE_CONTRACT, "deposit," + symcode.to_string(), 1 );
-    flush1.send( ext_in1.get_extended_symbol(), CURVE_CONTRACT, "deposit," + symcode.to_string(), 1 );
-    deposit.send( from, symcode );
+    // flush0.send( ext_in0.get_extended_symbol(), CURVE_CONTRACT, "deposit," + symcode.to_string(), 1 );
+    // flush1.send( ext_in1.get_extended_symbol(), CURVE_CONTRACT, "deposit," + symcode.to_string(), 1 );
+    // deposit.send( from, symcode );
 
-    //send excess
-    flush0.send( ext_in0.get_extended_symbol(), from, "excess", 0 );
-    flush1.send( ext_in1.get_extended_symbol(), from, "excess", 0 );
+    // //send excess
+    // flush0.send( ext_in0.get_extended_symbol(), from, "excess", 0 );
+    // flush1.send( ext_in1.get_extended_symbol(), from, "excess", 0 );
 
     //flush lp tokens
     flushltoken.send( ext_lp_sym, from, "liquidity", 1 );
