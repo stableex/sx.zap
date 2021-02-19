@@ -21,16 +21,45 @@ void zap::on_transfer( const name from, const name to, const asset quantity, con
     const symbol_code symcode = utils::parse_symbol_code(memo);
     check( symcode.raw(), "zap.sx::on_transfer: wrong memo format (ex: \"SXA\")");
 
+    extended_symbol lp_ext_sym = get_curve_token(symcode);
+    if( lp_ext_sym.get_symbol().is_valid() ){
+        do_deposit(ext_in, lp_ext_sym, from);
+        return;
+    }
+
+    lp_ext_sym = get_curve_token(quantity.symbol.code());
+    if( lp_ext_sym.get_symbol().is_valid() ){
+        do_withdraw(ext_in, symcode, from);
+        return;
+    }
+
+    check(false, "zap.sx::on_transfer: wrong memo format");
+
+}
+
+extended_symbol zap::get_curve_token(const symbol_code& symcode)
+{
+    sx::curve::pairs_table _pairs( CURVE_CONTRACT, CURVE_CONTRACT.value );
+    auto pairs = _pairs.find( symcode.raw() );
+    if(pairs == _pairs.end()) return {};
+
+    return pairs->liquidity.get_extended_symbol();
+}
+
+void zap::do_deposit(const extended_asset& ext_in, const extended_symbol& ext_sym_lptoken, const name& owner )
+{
+
     // calculate curve split
-    const auto [ ext_in0, ext_in1, ext_lp_sym] = get_curve_split( ext_in, symcode );
+    const symbol_code symcode = ext_sym_lptoken.get_symbol().code();
+    const auto [ ext_in0, ext_in1] = get_curve_split( ext_in, symcode );
     const extended_symbol ext_sym0 = ext_in0.get_extended_symbol();
     const extended_symbol ext_sym1 = ext_in1.get_extended_symbol();
 
     // // make sure zap.sx account is clean of tokens
-    const asset bal0 = utils::get_balance( ext_sym0, get_self() ).quantity;
-    const asset bal1 = utils::get_balance( ext_sym1, get_self() ).quantity;
-    const asset bal_lptokens = utils::get_balance( ext_lp_sym, get_self() ).quantity;
-    check( bal0 == quantity && bal1.amount == 0 && bal_lptokens.amount == 0, "zap.sx::on_transfer: balance not clean");
+    const extended_asset bal0 = utils::get_balance( ext_sym0, get_self() );
+    const extended_asset bal1 = utils::get_balance( ext_sym1, get_self() );
+    const extended_asset bal_lptokens = utils::get_balance( ext_sym_lptoken, get_self() );
+    check( bal0 == ext_in && bal1.quantity.amount == 0 && bal_lptokens.quantity.amount == 0, "zap.sx::on_transfer: balance not clean");
 
     // swap part of tokens for deposit
     transfer( get_self(), CURVE_CONTRACT, ext_in - ext_in0, "swap,0," + symcode.to_string() );
@@ -42,15 +71,45 @@ void zap::on_transfer( const name from, const name to, const asset quantity, con
     deposit( symcode );
 
     // send excess back to sender
-    flush.send( ext_sym0, from, "excess" );
-    flush.send( ext_sym1, from, "excess" );
+    flush.send( ext_sym0, owner, "excess" );
+    flush.send( ext_sym1, owner, "excess" );
 
     // send lptoken.sx to sender
-    flush.send( ext_lp_sym, from, "liquidity" );
+    flush.send( ext_sym_lptoken, owner, "liquidity" );
+}
+
+void zap::do_withdraw(const extended_asset& ext_in, const symbol_code& symcode_to, const name& owner )
+{
+    const auto pair_id = ext_in.quantity.symbol.code();
+
+    sx::curve::pairs_table _pairs( CURVE_CONTRACT, CURVE_CONTRACT.value );
+    auto pairs = _pairs.get( pair_id.raw(), "zap.sx::do_withdraw: `pair_id` does not exist on curve.sx");
+    check(ext_in.get_extended_symbol() == pairs.liquidity.get_extended_symbol(), "zap.sx::do_withdraw: invalid liquidity token");
+
+    if(pairs.reserve0.quantity.symbol.code() != symcode_to) swap(pairs.reserve0, pairs.reserve1);
+    check(pairs.reserve0.quantity.symbol.code() == symcode_to, "zap.sx::do_withdraw: no such token in pair");
+
+    const extended_symbol ext_sym0 = pairs.reserve0.get_extended_symbol();
+    const extended_symbol ext_sym1 = pairs.reserve1.get_extended_symbol();
+
+    const extended_asset bal0 = utils::get_balance( ext_sym0, get_self() );
+    const extended_asset bal1 = utils::get_balance( ext_sym1, get_self() );
+    check( bal0.quantity.amount == 0 && bal1.quantity.amount == 0, "zap.sx::on_transfer: balance not clean");
+
+    // withdraw
+    transfer( get_self(), CURVE_CONTRACT, ext_in, "");
+
+    // convert sym1 to sym0
+    flush_action flush( get_self(), { get_self(), "active"_n } );
+    flush.send( ext_sym1, CURVE_CONTRACT, "swap,0," + pair_id.to_string() );
+
+    //send sym0 to the owner
+    flush.send( ext_sym0, owner, "Curve.sx: withdraw" );
 }
 
 
-tuple<extended_asset, extended_asset, extended_symbol> zap::get_curve_split(const extended_asset ext_in, const symbol_code pair_id) {
+
+pair<extended_asset, extended_asset> zap::get_curve_split(const extended_asset ext_in, const symbol_code pair_id) {
 
     sx::curve::pairs_table _pairs( CURVE_CONTRACT, CURVE_CONTRACT.value );
     auto pairs = _pairs.get( pair_id.raw(), "zap.sx::get_curve_split: `pair_id` does not exist on curve.sx");
@@ -86,7 +145,7 @@ tuple<extended_asset, extended_asset, extended_symbol> zap::get_curve_split(cons
     const auto in0 = extended_asset { sx::curve::div_amount(static_cast<int64_t>(in0_amount), MAX_PRECISION, precision0), ext_in.get_extended_symbol() };
     const auto in1 = extended_asset { sx::curve::div_amount(static_cast<int64_t>(in1_amount), MAX_PRECISION, precision1), pairs.reserve1.get_extended_symbol() };
 
-    return { in0, in1, pairs.liquidity.get_extended_symbol() };
+    return { in0, in1 };
 }
 
 

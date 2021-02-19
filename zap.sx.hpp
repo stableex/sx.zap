@@ -26,7 +26,16 @@ public:
 private:
 
     // based on {ext_in} and {pair_id} find proper split for incoming deposit
-    tuple<extended_asset, extended_asset, extended_symbol> get_curve_split(const extended_asset ext_in, const symbol_code pair_id);
+    pair<extended_asset, extended_asset> get_curve_split(const extended_asset ext_in, const symbol_code pair_id);
+
+    // find lp token {symcode} in pairs
+    extended_symbol get_curve_token(const symbol_code& symcode);
+
+    // process deposit {ext_in} => {ext_sym_lptoken} for {owner}, i.e. USDT => SXA
+    void do_deposit(const extended_asset& ext_in, const extended_symbol& ext_sym_lptoken, const name& owner );
+
+    // process withdrawal {ext_in} => {symcode} for {owner}, i.e. SXA => USN
+    void do_withdraw(const extended_asset& ext_in, const symbol_code& symcode, const name& owner );
 
     // eosio.token helpers
     void transfer( const name from, const name to, const extended_asset value, const string memo );
