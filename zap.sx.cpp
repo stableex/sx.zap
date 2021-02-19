@@ -72,12 +72,13 @@ tuple<extended_asset, extended_asset, extended_symbol> zap::get_curve_split(cons
     //find best split using binary search
     uint128_t l = 0, r = in_amount;
     int128_t in0_amount = 0, in1_amount = 0;
-    int i=20;    //20 iterations for binary search or until we got within 1 bips
-    while(i-- && r-l > in_amount/10000 ){
+    int i=20;    //20 iterations for binary search or until we get close enough
+    while(i-- && r-l > in_amount/1000000 ){
         in0_amount = (r + l)/2;
-        in1_amount = Curve::get_amount_out(in_amount - in0_amount, res0_amount, res1_amount, amp, config.trade_fee + config.protocol_fee);
+        auto in1_0_amount = (in_amount - in0_amount)*(10000 - config.protocol_fee)/10000;   //how much will be added in res0 after swap
+        in1_amount = Curve::get_amount_out(in1_0_amount, res0_amount, res1_amount, amp, config.trade_fee);
 
-        if(in0_amount * (res0_amount + in_amount - in0_amount + res1_amount - in1_amount) > (res0_amount + in_amount - in0_amount) * (in0_amount + in1_amount))
+        if(in0_amount * (res0_amount + in1_0_amount + res1_amount - in1_amount) > (res0_amount + in1_0_amount) * (in0_amount + in1_amount))
             r = in0_amount;
         else
             l = in0_amount;
