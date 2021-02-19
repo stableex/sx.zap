@@ -26,8 +26,6 @@ void zap::on_transfer( const name from, const name to, const asset quantity, con
     const extended_symbol ext_sym0 = ext_in0.get_extended_symbol();
     const extended_symbol ext_sym1 = ext_in1.get_extended_symbol();
 
-    print("\n", quantity, " => ", ext_in0.quantity, " + ", ext_in1.quantity);
-
     // // make sure zap.sx account is clean of tokens
     // const asset bal0 = zap::get_balance( ext_sym0, get_self() );
     // const asset bal1 = zap::get_balance( ext_sym1, get_self() );
@@ -35,7 +33,7 @@ void zap::on_transfer( const name from, const name to, const asset quantity, con
     // check( bal0 == quantity /*&& bal1.amount == 0 && bal_lptokens.amount == 0*/, "zap.sx::on_transfer: balance not clean");
 
     // swap part of tokens for deposit
-    transfer( get_self(), CURVE_CONTRACT, ext_in0, "swap,0," + symcode.to_string() );
+    transfer( get_self(), CURVE_CONTRACT, ext_in - ext_in0, "swap,0," + symcode.to_string() );
 
     // deposit pair to curve.sx
     flush_action flush( get_self(), { get_self(), "active"_n } );
@@ -61,7 +59,8 @@ tuple<extended_asset, extended_asset, extended_symbol> zap::get_curve_split(cons
     check(pairs.reserve0.get_extended_symbol() == ext_in.get_extended_symbol(), "zap.sx::get_curve_split: invalid token for this `pair_id`");
 
     const auto amp = sx::curve::get_amplifier(pair_id);
-    print("\nReserves: ", pairs.reserve0.quantity, " & ", pairs.reserve1.quantity);
+    sx::curve::config_table _config( CURVE_CONTRACT, CURVE_CONTRACT.value );
+    auto config = _config.get();
 
     const uint8_t precision0 = pairs.reserve0.quantity.symbol.precision();
     const uint8_t precision1 = pairs.reserve1.quantity.symbol.precision();
@@ -70,12 +69,25 @@ tuple<extended_asset, extended_asset, extended_symbol> zap::get_curve_split(cons
     const int128_t res1_amount = sx::curve::mul_amount( pairs.reserve1.quantity.amount, MAX_PRECISION, precision1 );
     const int128_t in_amount = sx::curve::mul_amount( ext_in.quantity.amount, MAX_PRECISION, precision_in );
 
-    const auto in0_amount = (in_amount * res0_amount) / (res0_amount + res1_amount);
+    //find best split using binary search
+    uint128_t l = 0, r = in_amount;
+    int128_t in0_amount = 0, in1_amount = 0;
+    int i=20;    //20 iterations for binary search or until we got within 1 bips
+    while(i-- && r-l > in_amount/10000 ){
+        in0_amount = (r + l)/2;
+        in1_amount = Curve::get_amount_out(in_amount - in0_amount, res0_amount, res1_amount, amp, config.trade_fee + config.protocol_fee);
+
+        if(in0_amount * (res0_amount + in_amount - in0_amount + res1_amount - in1_amount) > (res0_amount + in_amount - in0_amount) * (in0_amount + in1_amount))
+            r = in0_amount;
+        else
+            l = in0_amount;
+    }
     const auto in0 = extended_asset { sx::curve::div_amount(static_cast<int64_t>(in0_amount), MAX_PRECISION, precision0), ext_in.get_extended_symbol() };
-    const auto in1 = extended_asset { sx::curve::div_amount(static_cast<int64_t>(in_amount - in0_amount), MAX_PRECISION, precision1), pairs.reserve1.get_extended_symbol() };
+    const auto in1 = extended_asset { sx::curve::div_amount(static_cast<int64_t>(in1_amount), MAX_PRECISION, precision1), pairs.reserve1.get_extended_symbol() };
 
     return { in0, in1, pairs.liquidity.get_extended_symbol() };
 }
+
 
 [[eosio::action]]
 void zap::flush( const extended_symbol ext_sym, const name to, const string memo )
