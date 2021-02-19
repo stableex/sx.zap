@@ -27,10 +27,10 @@ void zap::on_transfer( const name from, const name to, const asset quantity, con
     const extended_symbol ext_sym1 = ext_in1.get_extended_symbol();
 
     // // make sure zap.sx account is clean of tokens
-    // const asset bal0 = zap::get_balance( ext_sym0, get_self() );
-    // const asset bal1 = zap::get_balance( ext_sym1, get_self() );
-    // const asset bal_lptokens = zap::get_balance( ext_lp_sym, get_self() );
-    // check( bal0 == quantity /*&& bal1.amount == 0 && bal_lptokens.amount == 0*/, "zap.sx::on_transfer: balance not clean");
+    const asset bal0 = utils::get_balance( ext_sym0, get_self() ).quantity;
+    const asset bal1 = utils::get_balance( ext_sym1, get_self() ).quantity;
+    const asset bal_lptokens = utils::get_balance( ext_lp_sym, get_self() ).quantity;
+    check( bal0 == quantity && bal1.amount == 0 && bal_lptokens.amount == 0, "zap.sx::on_transfer: balance not clean");
 
     // swap part of tokens for deposit
     transfer( get_self(), CURVE_CONTRACT, ext_in - ext_in0, "swap,0," + symcode.to_string() );
@@ -95,7 +95,7 @@ void zap::flush( const extended_symbol ext_sym, const name to, const string memo
 {
     require_auth( get_self() );
 
-    const extended_asset balance = zap::get_balance( ext_sym, get_self() );
+    const extended_asset balance = utils::get_balance( ext_sym, get_self() );
     if ( balance.quantity.amount > 0 ) transfer( get_self(), to, balance, memo );
 }
 
@@ -111,15 +111,6 @@ void zap::transfer( const name from, const name to, const extended_asset value, 
 {
     eosio::token::transfer_action transfer( value.contract, { from, "active"_n });
     transfer.send( from, to, value.quantity, memo );
-}
-
-extended_asset zap::get_balance( const extended_symbol ext_sym, const name owner )
-{
-    eosio::token::accounts _accounts( ext_sym.get_contract(), owner.value );
-    auto accounts = _accounts.find( ext_sym.get_symbol().code().raw() );
-    if ( accounts == _accounts.end() ) return { 0, ext_sym };
-    check( ext_sym.get_symbol() == accounts->balance.symbol, "zap::get_balanace: extended symbol mismatch balance");
-    return { accounts->balance.amount, ext_sym };
 }
 
 }

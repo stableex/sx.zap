@@ -30,7 +30,6 @@ private:
 
     // eosio.token helpers
     void transfer( const name from, const name to, const extended_asset value, const string memo );
-    extended_asset get_balance( const extended_symbol ext_sym, const name owner );
 
     // sx.curve helpers
     void deposit( const symbol_code symcode );
