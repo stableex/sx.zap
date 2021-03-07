@@ -20,6 +20,6 @@ $ cleos transfer myaccount zap.sx "10.0000 USDT" "SXA" --contract tethertether
 > Transfer liquidity tokens with the desired token symbol code as memo. Zap.SX will withdraw liquidity, convert to the desired tokens on Curve.SX and send all tokens to the owner. 
 
 ```bash
-$ cleos transfer myaccount zap.sx "10.0000 SXA" "USN" --contract lptoken.sx
-# => receive corresponding liquidity converted to USN
+$ cleos transfer myaccount zap.sx "10.0000 SXA" "USDT" --contract lptoken.sx
+# => receive corresponding liquidity converted to USDT
 ```
