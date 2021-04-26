@@ -20,7 +20,6 @@ public:
     // flush all of {ext_sym} to {to} with {memo}, fail if balance amount < {min}
     [[eosio::action]]
     void flush( const extended_symbol ext_sym, const name to, const string memo );
-
     using flush_action = action_wrapper<"flush"_n, &zap::flush>;
 
 private:
@@ -30,6 +29,8 @@ private:
 
     // find lp token {symcode} in pairs
     extended_symbol get_curve_token(const symbol_code& symcode);
+
+    bool is_wrapped_pair(const symbol_code& symcode);
 
     // process deposit {ext_in} => {ext_sym_lptoken} for {owner}, i.e. USDT => SXA
     void do_deposit(const extended_asset& ext_in, const extended_symbol& ext_sym_lptoken, const name& owner );

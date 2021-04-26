@@ -2,6 +2,7 @@
 #include <sx.utils/utils.hpp>
 #include <sx.curve/curve.sx.hpp>
 #include <eosio.token/eosio.token.hpp>
+#include <sx.defilend/defilend.hpp>
 
 #include "zap.sx.hpp"
 
@@ -14,7 +15,7 @@ void zap::on_transfer( const name from, const name to, const asset quantity, con
     require_auth( from );
 
     // ignore transfers
-    if ( to != get_self() || memo == get_self().to_string() || from == "eosio.ram"_n || from == CURVE_CONTRACT) return;
+    if ( to != get_self() || memo == get_self().to_string() || from == "eosio.ram"_n || from == CURVE_CONTRACT || from == defilend::code) return;
 
     // user input
     const extended_asset ext_in = { quantity, get_first_receiver() };
@@ -46,8 +47,20 @@ extended_symbol zap::get_curve_token(const symbol_code& symcode)
     return pairs->liquidity.get_extended_symbol();
 }
 
-void zap::do_deposit(const extended_asset& ext_in, const extended_symbol& ext_sym_lptoken, const name& owner )
+bool zap::is_wrapped_pair(const symbol_code& symcode)
 {
+    sx::curve::pairs_table _pairs( CURVE_CONTRACT, CURVE_CONTRACT.value );
+    auto pairs = _pairs.find( symcode.raw() );
+    if(pairs == _pairs.end()) return false;
+
+    return defilend::is_btoken(pairs->reserve0.quantity.symbol) && defilend::is_btoken(pairs->reserve1.quantity.symbol);
+}
+
+void zap::do_deposit(const extended_asset& ext_quantity, const extended_symbol& ext_sym_lptoken, const name& owner )
+{
+    auto ext_in = ext_quantity;
+    bool must_wrap = !defilend::is_btoken(ext_in.quantity.symbol) && is_wrapped_pair(ext_sym_lptoken.get_symbol().code());
+    if(must_wrap) ext_in = defilend::wrap(ext_in.quantity);
 
     // calculate curve split
     const symbol_code symcode = ext_sym_lptoken.get_symbol().code();
@@ -59,13 +72,23 @@ void zap::do_deposit(const extended_asset& ext_in, const extended_symbol& ext_sy
     const extended_asset bal0 = utils::get_balance( ext_sym0, get_self() );
     const extended_asset bal1 = utils::get_balance( ext_sym1, get_self() );
     const extended_asset bal_lptokens = utils::get_balance( ext_sym_lptoken, get_self() );
-    check( bal0 == ext_in && bal1.quantity.amount == 0 && bal_lptokens.quantity.amount == 0, "zap.sx::on_transfer: balance not clean");
+    check( ( must_wrap && bal0.quantity.amount == 0 || bal0 == ext_in ) && bal1.quantity.amount == 0 && bal_lptokens.quantity.amount == 0, "zap.sx::on_transfer: balance not clean");
+
+    flush_action flush( get_self(), { get_self(), "active"_n } );
+    if(must_wrap) {
+        action(
+            permission_level{get_self(),"active"_n},
+            defilend::code,
+            "unstake"_n,
+            std::make_tuple(get_self(), ext_in.quantity.symbol.code())
+        ).send();
+        flush.send( ext_quantity.get_extended_symbol(), defilend::code, "deposit");
+    }
 
     // swap part of tokens for deposit
     transfer( get_self(), CURVE_CONTRACT, ext_in - ext_in0, "swap,0," + symcode.to_string() );
 
     // deposit pair to curve.sx
-    flush_action flush( get_self(), { get_self(), "active"_n } );
     flush.send( ext_sym0, CURVE_CONTRACT, "deposit," + symcode.to_string() );
     flush.send( ext_sym1, CURVE_CONTRACT, "deposit," + symcode.to_string() );
     deposit( symcode );
@@ -156,6 +179,7 @@ void zap::flush( const extended_symbol ext_sym, const name to, const string memo
 
     const extended_asset balance = utils::get_balance( ext_sym, get_self() );
     if ( balance.quantity.amount > 0 ) transfer( get_self(), to, balance, memo );
+
 }
 
 // sx.curve helpers
