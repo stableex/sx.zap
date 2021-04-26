@@ -76,12 +76,7 @@ void zap::do_deposit(const extended_asset& ext_quantity, const extended_symbol& 
 
     flush_action flush( get_self(), { get_self(), "active"_n } );
     if(must_wrap) {
-        action(
-            permission_level{get_self(),"active"_n},
-            defilend::code,
-            "unstake"_n,
-            std::make_tuple(get_self(), ext_in.quantity.symbol.code())
-        ).send();
+        defilend::unstake(get_self(), get_self(), ext_in.quantity.symbol.code());
         flush.send( ext_quantity.get_extended_symbol(), defilend::code, "deposit");
     }
 
