@@ -53,13 +53,13 @@ bool zap::is_wrapped_pair(const symbol_code& symcode)
     auto pairs = _pairs.find( symcode.raw() );
     if(pairs == _pairs.end()) return false;
 
-    return defilend::is_btoken(pairs->reserve0.quantity.symbol) && defilend::is_btoken(pairs->reserve1.quantity.symbol);
+    return defilend::is_btoken(pairs->reserve0.quantity.symbol.code()) && defilend::is_btoken(pairs->reserve1.quantity.symbol.code());
 }
 
 void zap::do_deposit(const extended_asset& ext_quantity, const extended_symbol& ext_sym_lptoken, const name& owner )
 {
     auto ext_in = ext_quantity;
-    bool must_wrap = !defilend::is_btoken(ext_in.quantity.symbol) && is_wrapped_pair(ext_sym_lptoken.get_symbol().code());
+    bool must_wrap = !defilend::is_btoken(ext_in.quantity.symbol.code()) && is_wrapped_pair(ext_sym_lptoken.get_symbol().code());
     if(must_wrap) ext_in = defilend::wrap(ext_in.quantity);
 
     // calculate curve split
@@ -104,15 +104,16 @@ void zap::do_withdraw(const extended_asset& ext_in, const symbol_code& symcode_t
     auto pairs = _pairs.get( pair_id.raw(), "zap.sx::do_withdraw: `pair_id` does not exist on curve.sx");
     check(ext_in.get_extended_symbol() == pairs.liquidity.get_extended_symbol(), "zap.sx::do_withdraw: invalid liquidity token");
 
-    if(pairs.reserve0.quantity.symbol.code() != symcode_to) swap(pairs.reserve0, pairs.reserve1);
-    check(pairs.reserve0.quantity.symbol.code() == symcode_to, "zap.sx::do_withdraw: no such token in pair");
+    const auto btoken_to = defilend::get_btoken(symcode_to).get_symbol().code();
+    if(pairs.reserve0.quantity.symbol.code() != symcode_to && pairs.reserve0.quantity.symbol.code() != btoken_to) swap(pairs.reserve0, pairs.reserve1);
+    check(pairs.reserve0.quantity.symbol.code() == symcode_to || pairs.reserve0.quantity.symbol.code() == btoken_to, "zap.sx::do_withdraw: no such token in pair");
 
     const extended_symbol ext_sym0 = pairs.reserve0.get_extended_symbol();
     const extended_symbol ext_sym1 = pairs.reserve1.get_extended_symbol();
 
     const extended_asset bal0 = utils::get_balance( ext_sym0, get_self() );
     const extended_asset bal1 = utils::get_balance( ext_sym1, get_self() );
-    check( bal0.quantity.amount == 0 && bal1.quantity.amount == 0, "zap.sx::on_transfer: balance not clean");
+    check( bal0.quantity.amount == 0 && bal1.quantity.amount == 0, "zap.sx::do_withdraw: balance not clean");
 
     // withdraw
     transfer( get_self(), CURVE_CONTRACT, ext_in, "");
@@ -121,8 +122,16 @@ void zap::do_withdraw(const extended_asset& ext_in, const symbol_code& symcode_t
     flush_action flush( get_self(), { get_self(), "active"_n } );
     flush.send( ext_sym1, CURVE_CONTRACT, "swap,0," + pair_id.to_string() );
 
-    //send sym0 to the owner
-    flush.send( ext_sym0, owner, "Curve.sx: withdraw" );
+    //if target symbol - one of the reserves: flush it, otherwise: try to unwrap it
+    if(ext_sym0.get_symbol().code() == symcode_to){
+        flush.send( ext_sym0, owner, "Curve.sx: withdraw" );
+    }
+    else {
+        const auto out = defilend::unwrap(bal0.quantity);
+        check(out.quantity.symbol.code() == symcode_to, "zap.sx::do_withdraw: can't unwrap token");
+        flush.send( ext_sym0, defilend::code, "");      //unwrap
+        flush.send( out.get_extended_symbol(), owner, "Curve.sx: withdraw" );
+    }
 }
 
 
