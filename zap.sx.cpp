@@ -53,13 +53,13 @@ bool zap::is_wrapped_pair(const symbol_code& symcode)
     auto pairs = _pairs.find( symcode.raw() );
     if(pairs == _pairs.end()) return false;
 
-    return defilend::is_btoken(pairs->reserve0.quantity.symbol.code()) && defilend::is_btoken(pairs->reserve1.quantity.symbol.code());
+    return defilend::is_btoken(pairs->reserve0.quantity.symbol) && defilend::is_btoken(pairs->reserve1.quantity.symbol);
 }
 
 void zap::do_deposit(const extended_asset& ext_quantity, const extended_symbol& ext_sym_lptoken, const name& owner )
 {
     auto ext_in = ext_quantity;
-    bool must_wrap = !defilend::is_btoken(ext_in.quantity.symbol.code()) && is_wrapped_pair(ext_sym_lptoken.get_symbol().code());
+    bool must_wrap = !defilend::is_btoken(ext_in.quantity.symbol) && is_wrapped_pair(ext_sym_lptoken.get_symbol().code());
     if(must_wrap) ext_in = defilend::wrap(ext_in.quantity);
 
     // calculate curve split
@@ -190,7 +190,7 @@ void zap::flush( const extended_symbol ext_sym, const name to, const string memo
 void zap::deposit( const symbol_code symcode )
 {
     sx::curve::deposit_action deposit( CURVE_CONTRACT, { get_self(), "active"_n } );
-    deposit.send( get_self(), symcode );
+    deposit.send( get_self(), symcode, 0 );
 }
 
 // eosio.token helpers
